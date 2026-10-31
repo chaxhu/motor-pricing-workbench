@@ -14,9 +14,8 @@ so there are two engines:
 Tests price the same policies with both and require the answers to match
 exactly, to the penny. If they ever differ, one of them is wrong.
 
-Rounding note: the vectorised engine rounds with np.round and the reference
-engine with Python's round. They can disagree on rare half-penny values. This
-is a known difference that the engine comparison is meant to catch.
+Both engines round the final premium with round_pence, so there is one
+rounding rule in one place. See its docstring for why that matters.
 
 All rates and factors are illustrative assumptions, not real Hastings Direct
 pricing.
@@ -39,6 +38,23 @@ MAX_EXAMPLES = 5
 
 class PricingError(ValueError):
     """Raised when a policy cannot be priced, for example a value outside every band."""
+
+
+def round_pence(x: Any) -> np.ndarray:
+    """Round money to the nearest penny, with halves always rounding up.
+
+    Works on a single number or an array. 2.675 becomes 2.68, 2.674 becomes 2.67.
+
+    Why this exists: the vectorised engine used to round with np.round and
+    the reference engine with Python's round. Both work out the same raw
+    premium, but they treat an exact half penny differently: np.round sends
+    it to the nearest even penny, and Python's round depends on whether the
+    computer happened to store the number a hair above or below the half.
+    So the engines disagreed by 1p on a small share of policies (21 of 2,000
+    in one test run, all on premiums like 460.845). The engine equivalence
+    test caught it. Using this one rule in both engines fixed it.
+    """
+    return np.floor(np.asarray(x, dtype=float) * 100 + 0.5) / 100
 
 
 def factor_lookup(values: Any, table: RateTable, name: str) -> np.ndarray:
@@ -78,7 +94,7 @@ def price_breakdown(policies: pd.DataFrame, table: RateTable) -> pd.DataFrame:
         out[f"f_{name}"] = factor
         premium = premium * factor
 
-    out["premium"] = np.round(premium, 2)
+    out["premium"] = round_pence(premium)
     logger.debug("Priced %d policies on '%s' rates (vectorised)", len(out), table.version)
     return out
 
@@ -107,7 +123,7 @@ def price_one(policy: dict[str, Any], table: RateTable) -> float:
                 f"{name}: value {value!r} outside every band "
                 f"(policy_id={policy.get('policy_id')!r})"
             )
-    return round(premium, 2)
+    return float(round_pence(premium))
 
 
 def price_row_by_row(policies: pd.DataFrame, table: RateTable) -> pd.Series:
