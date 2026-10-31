@@ -20,7 +20,7 @@ factors:
     - {lower: 25, upper: 35, factor: 1.20}
     - {lower: 35, upper: 60, factor: 1.00}
     - {lower: 60, upper: 75, factor: 1.05}
-    - {lower: 75, upper: 120, factor: 1.30}
+    - {lower: 75, upper: 100, factor: 1.30}  # very few people drive past their mid 90s
 
   vehicle_age:
     - {lower: 0, upper: 3, factor: 1.15}
