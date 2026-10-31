@@ -1,0 +1,46 @@
+# Proposed motor rating table.
+#
+# ILLUSTRATIVE ONLY. These numbers are made up for a portfolio project.
+# They are not real Hastings Direct pricing, or any insurer's pricing.
+#
+# The story behind this change:
+#   Claims costs are rising. To keep up, we charge more where the risk is
+#   highest: drivers doing very high mileage (15,000+ miles a year) and
+#   drivers with one claim in the last five years. To stay competitive on
+#   lower risk business, we give a small discount on cars aged 8 to 14 years.
+#
+# Only three numbers differ from rates_current.yaml. Each is marked "# was ...".
+
+version: proposed
+base_premium: 420.0
+
+factors:
+  driver_age:
+    - {lower: 17, upper: 25, factor: 1.80}
+    - {lower: 25, upper: 35, factor: 1.20}
+    - {lower: 35, upper: 60, factor: 1.00}
+    - {lower: 60, upper: 75, factor: 1.05}
+    - {lower: 75, upper: 120, factor: 1.30}
+
+  vehicle_age:
+    - {lower: 0, upper: 3, factor: 1.15}
+    - {lower: 3, upper: 8, factor: 1.00}
+    - {lower: 8, upper: 15, factor: 0.92}  # was 0.95
+    - {lower: 15, upper: 60, factor: 1.10}
+
+  annual_mileage:
+    - {lower: 0, upper: 5000, factor: 0.90}
+    - {lower: 5000, upper: 10000, factor: 1.00}
+    - {lower: 10000, upper: 15000, factor: 1.10}
+    - {lower: 15000, upper: 200000, factor: 1.35}  # was 1.25
+
+  driving_experience:
+    - {lower: 0, upper: 2, factor: 1.30}
+    - {lower: 2, upper: 5, factor: 1.10}
+    - {lower: 5, upper: 100, factor: 1.00}
+
+  claims_last_5y:
+    - {lower: 0, upper: 1, factor: 1.00}
+    - {lower: 1, upper: 2, factor: 1.32}  # was 1.25
+    - {lower: 2, upper: 3, factor: 1.50}
+    - {lower: 3, upper: 50, factor: 1.90}
