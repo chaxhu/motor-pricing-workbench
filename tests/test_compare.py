@@ -17,6 +17,7 @@ from workbench.compare import (
     Check,
     compare_premiums,
     explain_policy,
+    largest_changes,
     portfolio_summary,
     reconcile,
     segment_impact,
@@ -108,3 +109,16 @@ def test_explain_policy_matches_hand_worked_premiums(
     assert table.loc["annual_mileage", "value"] == "16,000"
     assert table.loc["premium", ["current", "proposed"]].tolist() == [1234.41, 1363.36]  # see test_pricing.py
     assert table.index[table["changed"]].tolist() == ["vehicle_age", "annual_mileage", "claims_last_5y", "premium"]
+
+
+def test_largest_changes_picks_the_biggest_rise_and_fall(policies: pd.DataFrame, proposed_rates: RateTable) -> None:
+    results = compare_premiums(policies, proposed_rates)
+    moves = largest_changes(results)
+
+    assert moves["rise"]["premium_change"] == results["premium_change"].max() > 0
+    assert moves["fall"]["premium_change"] == results["premium_change"].min() < 0
+
+
+def test_largest_changes_is_none_when_nothing_moves(policies: pd.DataFrame, current_rates: RateTable) -> None:
+    moves = largest_changes(compare_premiums(policies, current_rates))
+    assert moves == {"rise": None, "fall": None}

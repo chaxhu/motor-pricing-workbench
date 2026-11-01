@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from workbench.compare import Check, explain_policy
+from workbench.compare import Check, explain_policy, largest_changes
 from workbench.data import N_INJECTED_ROWS, POLICY_COLUMNS, generate_policies, inject_errors
 from workbench.pipeline import (
     BAD_INPUT_ERRORS,
@@ -188,6 +188,28 @@ def show_segments(segments: pd.DataFrame) -> None:
     )
 
 
+def show_largest_changes(results: pd.DataFrame) -> None:
+    """Show the largest rise and fall in pounds, each with a button that looks the policy up."""
+    st.subheader("Largest rise and fall")
+    cols = st.columns(2)
+    for col, (kind, label) in zip(cols, [("rise", "Largest rise"), ("fall", "Largest fall")]):
+        row = largest_changes(results)[kind]
+        if row is None:
+            col.metric(label, "None")
+            continue
+        col.metric(label, format_pounds(row["premium_change"], sign=True))
+        col.caption(f"{row['policy_id']}, {row['pct_change']:+.2f}%, {format_pounds(row['current_premium'])} now")
+        col.button(
+            f"Look up {row['policy_id']}", key=f"lookup_{kind}",
+            on_click=set_lookup, args=(row["policy_id"],),
+        )
+
+
+def set_lookup(policy_id: str) -> None:
+    """Button callback: put a policy ID in the lookup box before the page redraws."""
+    st.session_state["lookup_id"] = policy_id
+
+
 def show_lookup(evaluation: EvaluationResult, current: RateTable, proposed: RateTable) -> None:
     st.subheader("Look up a policy")
     policy_id = st.text_input("Policy ID", key="lookup_id", placeholder="for example POL0000001").strip()
@@ -288,5 +310,6 @@ current_rates, proposed_rates = load_rates(run["proposed_yaml"], run["proposed_n
 show_rate_changes(current_rates, proposed_rates)
 show_chart(evaluation)
 show_segments(evaluation.segments)
+show_largest_changes(evaluation.results)
 show_lookup(evaluation, current_rates, proposed_rates)
 show_rejected(evaluation.validation)

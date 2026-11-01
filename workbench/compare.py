@@ -129,6 +129,26 @@ def segment_impact(results: pd.DataFrame) -> pd.DataFrame:
         return pd.read_sql_query(query, conn)
 
 
+def largest_changes(results: pd.DataFrame) -> dict[str, pd.Series | None]:
+    """The policy with the largest rise and the one with the largest fall, in pounds.
+
+    Pounds rather than percent, because only a few distinct % changes exist,
+    so many policies tie on the largest %. Any tie goes to the lowest
+    policy_id, so the answer is always the same. A value is None when no
+    policy rises (or falls).
+    """
+    rises = results[results["premium_change"] > 0]
+    falls = results[results["premium_change"] < 0]
+    return {
+        "rise": _first(rises.sort_values(["premium_change", "policy_id"], ascending=[False, True])),
+        "fall": _first(falls.sort_values(["premium_change", "policy_id"], ascending=[True, True])),
+    }
+
+
+def _first(df: pd.DataFrame) -> pd.Series | None:
+    return None if df.empty else df.iloc[0]
+
+
 def explain_policy(policy: pd.DataFrame, current: RateTable, proposed: RateTable) -> pd.DataFrame:
     """Show how one policy's premium is built on each rate table, factor by factor.
 

@@ -30,6 +30,7 @@ def test_app_runs_and_shows_metrics() -> None:
     labels = [m.label for m in at.metric]
     assert labels == [
         "Policies priced", "Rejected", "Affected", "Total premium change", "Total premium change %",
+        "Largest rise", "Largest fall",
     ]
     assert at.metric[1].value == "7"
     assert not at.error
