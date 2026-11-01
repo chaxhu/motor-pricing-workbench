@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,42 @@ def check_rate_table(table: RateTable) -> None:
 
     for name in RATING_FACTORS:
         _check_bands(table.version, name, table.factors[name])
+
+
+def rate_changes(current: RateTable, proposed: RateTable) -> pd.DataFrame:
+    """Line up two rate tables band by band, so the changes can be read side by side.
+
+    One row for the base premium and one for each band. Bands are matched on
+    factor and band edges, so a band that exists in only one table shows a
+    blank on the other side. Returns factor, band, current, proposed and changed.
+    """
+    merged = _band_rows(current).merge(
+        _band_rows(proposed), on=["order", "factor", "lower", "upper"], how="outer", suffixes=("_cur", "_prop")
+    )
+    merged = merged.sort_values(["order", "lower", "upper"], ignore_index=True)
+    return pd.DataFrame(
+        {
+            "factor": merged["factor"],
+            "band": [_band_label(f, lo, up) for f, lo, up in zip(merged["factor"], merged["lower"], merged["upper"])],
+            "current": merged["value_cur"],
+            "proposed": merged["value_prop"],
+            # A blank on either side compares as not equal, so a missing band counts as changed.
+            "changed": merged["value_cur"] != merged["value_prop"],
+        }
+    )
+
+
+def _band_rows(table: RateTable) -> pd.DataFrame:
+    """One row per band, plus the base premium first, with a sort order that follows the formula."""
+    rows = [(0, "base_premium", 0.0, 0.0, table.base_premium)]
+    for order, name in enumerate(RATING_FACTORS, start=1):
+        rows += [(order, name, band.lower, band.upper, band.factor) for band in table.factors[name]]
+    return pd.DataFrame(rows, columns=["order", "factor", "lower", "upper", "value"])
+
+
+def _band_label(factor: str, lower: float, upper: float) -> str:
+    """Describe a band in words, for example '15,000 to under 200,000'."""
+    return "all policies" if factor == "base_premium" else f"{lower:,g} to under {upper:,g}"
 
 
 def _check_bands(version: str, name: str, bands: tuple[Band, ...]) -> None:

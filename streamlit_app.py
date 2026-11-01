@@ -29,7 +29,7 @@ from workbench.pipeline import (
     read_policies,
     run_evaluation,
 )
-from workbench.rates import RateTable, RateTableError, load_rate_table, parse_rate_table
+from workbench.rates import RateTable, RateTableError, load_rate_table, parse_rate_table, rate_changes
 from workbench.report import distribution_figure, format_pounds
 from workbench.validate import SchemaError, ValidationResult
 
@@ -39,6 +39,7 @@ SYNTHETIC = "Synthetic"
 UPLOAD_CSV = "Upload policies CSV"
 CONFIG_RATES = "Use config/rates_proposed.yaml"
 UPLOAD_YAML = "Upload YAML"
+CHANGED_STYLE = "background-color: rgba(255, 193, 7, 0.35)"  # amber, readable on light and dark themes
 
 
 @st.cache_data(max_entries=20)
@@ -148,6 +149,23 @@ def show_reconciliation(checks: list[Check]) -> None:
     st.dataframe(table, hide_index=True)
 
 
+def show_rate_changes(current: RateTable, proposed: RateTable) -> None:
+    st.subheader("Rate changes")
+    table = rate_changes(current, proposed)
+    st.caption(
+        f"Rate table '{current.version}' against '{proposed.version}'. "
+        f"{int(table['changed'].sum())} of {len(table)} rows changed, highlighted below. "
+        "Illustrative rates only."
+    )
+    styled = (
+        table.style
+        .apply(lambda row: [CHANGED_STYLE if row["changed"] else ""] * len(row), axis=1)
+        .format({"current": "{:.2f}", "proposed": "{:.2f}"}, na_rep="(no band)")
+        .format({"changed": lambda changed: "Yes" if changed else ""})
+    )
+    st.dataframe(styled, hide_index=True)
+
+
 def show_chart(evaluation: EvaluationResult) -> None:
     st.subheader("How premiums change")
     fig = distribution_figure(evaluation.results)
@@ -234,6 +252,8 @@ if not evaluation.reconciliation_passed:
 
 show_headlines(evaluation)
 show_reconciliation(evaluation.checks)
+current_rates, proposed_rates = load_rates(run["proposed_yaml"], run["proposed_name"])
+show_rate_changes(current_rates, proposed_rates)
 show_chart(evaluation)
 show_segments(evaluation.segments)
 show_rejected(evaluation.validation)

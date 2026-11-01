@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 
 from workbench.pricing import PricingError, price_one, price_portfolio, price_row_by_row, round_pence
-from workbench.rates import Band, RateTable, RateTableError, check_rate_table, parse_rate_table
+from workbench.rates import Band, RateTable, RateTableError, check_rate_table, parse_rate_table, rate_changes
 from tests.conftest import CONFIG_DIR
 
 # A policy where every factor except driver_age is 1.00 on the current rates,
@@ -109,3 +109,25 @@ def test_parse_rate_table_matches_file_and_runs_the_checks(proposed_rates: RateT
     gappy = text.replace("{lower: 3, upper: 8,", "{lower: 4, upper: 8,")  # vehicle_age now skips 3 to 4
     with pytest.raises(RateTableError, match="gap between 3.0 and 4.0"):
         parse_rate_table(gappy, source="upload.yaml")
+
+
+def test_rate_changes_finds_exactly_the_changed_bands(current_rates: RateTable, proposed_rates: RateTable) -> None:
+    table = rate_changes(current_rates, proposed_rates)
+    changed = table[table["changed"]]
+
+    assert list(zip(changed["factor"], changed["current"], changed["proposed"])) == [
+        ("vehicle_age", 0.95, 0.92),
+        ("annual_mileage", 1.25, 1.35),
+        ("claims_last_5y", 1.25, 1.32),
+    ]
+    assert not rate_changes(current_rates, current_rates)["changed"].any()
+
+
+def test_rate_changes_shows_a_split_band_on_both_sides(current_rates: RateTable) -> None:
+    split = (Band(0, 3, 1.15), Band(3, 5, 1.00), Band(5, 8, 1.00), *current_rates.factors["vehicle_age"][2:])
+    proposed = replace(current_rates, factors={**current_rates.factors, "vehicle_age": split})
+    table = rate_changes(current_rates, proposed)
+    changed = table[table["changed"]]
+
+    assert list(changed["band"]) == ["3 to under 5", "3 to under 8", "5 to under 8"]
+    assert changed["current"].isna().sum() == 2 and changed["proposed"].isna().sum() == 1
