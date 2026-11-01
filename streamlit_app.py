@@ -40,6 +40,7 @@ UPLOAD_CSV = "Upload policies CSV"
 CONFIG_RATES = "Use config/rates_proposed.yaml"
 UPLOAD_YAML = "Upload YAML"
 CHANGED_STYLE = "background-color: rgba(255, 193, 7, 0.35)"  # amber, readable on light and dark themes
+ROW_HEIGHT = 35  # pixels per st.dataframe row, used to size tables that should not scroll
 
 
 @st.cache_data(max_entries=20)
@@ -195,13 +196,22 @@ def show_rate_changes(current: RateTable, proposed: RateTable) -> None:
         f"{int(table['changed'].sum())} of {len(table)} rows changed, highlighted below. "
         "Illustrative rates only."
     )
-    styled = (
-        table.style
-        .apply(lambda row: [CHANGED_STYLE if row["changed"] else ""] * len(row), axis=1)
-        .format({"current": "{:.2f}", "proposed": "{:.2f}"}, na_rep="(no band)")
-        .format({"changed": lambda changed: "Yes" if changed else ""})
+    show_highlighted(table)
+
+
+def show_highlighted(table: pd.DataFrame) -> None:
+    """Show a table with current and proposed columns, shading the rows where changed is True.
+
+    changed is shown as the word "Yes" so the change does not rely on colour alone.
+    Numbers are formatted with column_config, because st.dataframe ignores Styler number formats.
+    """
+    shown = table.assign(changed=table["changed"].map({True: "Yes", False: ""}))
+    styled = shown.style.apply(lambda row: [CHANGED_STYLE if row["changed"] else ""] * len(row), axis=1)
+    number = st.column_config.NumberColumn(format="%.2f")
+    st.dataframe(
+        styled, hide_index=True, column_config={"current": number, "proposed": number},
+        height=ROW_HEIGHT * (len(shown) + 1) + 3,  # tall enough that every row shows without scrolling
     )
-    st.dataframe(styled, hide_index=True)
 
 
 def show_chart(evaluation: EvaluationResult) -> None:
@@ -270,14 +280,7 @@ def show_lookup(evaluation: EvaluationResult, current: RateTable, proposed: Rate
         f"a change of {format_pounds(row['premium_change'], sign=True)} ({row['pct_change']:+.2f}%). "
         "premium = base premium x each factor, rounded to the penny."
     )
-    breakdown = explain_policy(match, current, proposed)
-    styled = (
-        breakdown.style
-        .apply(lambda r: [CHANGED_STYLE if r["changed"] else ""] * len(r), axis=1)
-        .format({"current": "{:,.2f}", "proposed": "{:,.2f}"})
-        .format({"changed": lambda changed: "Yes" if changed else ""})
-    )
-    st.dataframe(styled, hide_index=True)
+    show_highlighted(explain_policy(match, current, proposed))
 
 
 def show_rejected(validation: ValidationResult) -> None:
