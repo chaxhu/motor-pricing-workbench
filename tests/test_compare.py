@@ -16,6 +16,7 @@ import pandas as pd
 from workbench.compare import (
     Check,
     compare_premiums,
+    explain_policy,
     portfolio_summary,
     reconcile,
     segment_impact,
@@ -96,3 +97,14 @@ def test_pipeline_stops_when_too_many_rejected(tmp_path: Path) -> None:
 
 def _failures(checks: list[Check]) -> str:
     return "; ".join(f"{c.name}: {c.detail}" for c in checks if not c.passed)
+
+
+def test_explain_policy_matches_hand_worked_premiums(
+    one_policy: dict[str, Any], current_rates: RateTable, proposed_rates: RateTable
+) -> None:
+    table = explain_policy(pd.DataFrame([one_policy]), current_rates, proposed_rates).set_index("step")
+
+    assert table.loc["vehicle_age", ["current", "proposed"]].tolist() == [0.95, 0.92]
+    assert table.loc["annual_mileage", "value"] == "16,000"
+    assert table.loc["premium", ["current", "proposed"]].tolist() == [1234.41, 1363.36]  # see test_pricing.py
+    assert table.index[table["changed"]].tolist() == ["vehicle_age", "annual_mileage", "claims_last_5y", "premium"]

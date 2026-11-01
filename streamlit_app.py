@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from workbench.compare import Check
+from workbench.compare import Check, explain_policy
 from workbench.data import N_INJECTED_ROWS, POLICY_COLUMNS, generate_policies, inject_errors
 from workbench.pipeline import (
     BAD_INPUT_ERRORS,
@@ -188,6 +188,38 @@ def show_segments(segments: pd.DataFrame) -> None:
     )
 
 
+def show_lookup(evaluation: EvaluationResult, current: RateTable, proposed: RateTable) -> None:
+    st.subheader("Look up a policy")
+    policy_id = st.text_input("Policy ID", key="lookup_id", placeholder="for example POL0000001").strip()
+    if not policy_id:
+        return
+
+    results, rejected = evaluation.results, evaluation.validation.rejected
+    match = results[results["policy_id"] == policy_id]
+    if match.empty:
+        reasons = rejected.loc[rejected["policy_id"] == policy_id, "reasons"]
+        if reasons.empty:
+            st.info(f"No policy with ID {policy_id}.")
+        else:
+            st.warning(f"{policy_id} was rejected, so it was not priced. Reasons: {'; '.join(reasons)}.")
+        return
+
+    row = match.iloc[0]
+    st.caption(
+        f"{policy_id}: {format_pounds(row['current_premium'])} now, {format_pounds(row['proposed_premium'])} proposed, "
+        f"a change of {format_pounds(row['premium_change'], sign=True)} ({row['pct_change']:+.2f}%). "
+        "premium = base premium x each factor, rounded to the penny."
+    )
+    breakdown = explain_policy(match, current, proposed)
+    styled = (
+        breakdown.style
+        .apply(lambda r: [CHANGED_STYLE if r["changed"] else ""] * len(r), axis=1)
+        .format({"current": "{:,.2f}", "proposed": "{:,.2f}"})
+        .format({"changed": lambda changed: "Yes" if changed else ""})
+    )
+    st.dataframe(styled, hide_index=True)
+
+
 def show_rejected(validation: ValidationResult) -> None:
     st.subheader("Rejected policies")
     if validation.rejected.empty:
@@ -256,4 +288,5 @@ current_rates, proposed_rates = load_rates(run["proposed_yaml"], run["proposed_n
 show_rate_changes(current_rates, proposed_rates)
 show_chart(evaluation)
 show_segments(evaluation.segments)
+show_lookup(evaluation, current_rates, proposed_rates)
 show_rejected(evaluation.validation)

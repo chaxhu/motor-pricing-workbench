@@ -23,8 +23,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from workbench.pricing import price_portfolio, round_pence
-from workbench.rates import RateTable
+from workbench.pricing import price_breakdown, price_portfolio, round_pence
+from workbench.rates import RATING_FACTORS, RateTable
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,30 @@ def segment_impact(results: pd.DataFrame) -> pd.DataFrame:
     with closing(sqlite3.connect(":memory:")) as conn:
         table.to_sql("results", conn, index=False)
         return pd.read_sql_query(query, conn)
+
+
+def explain_policy(policy: pd.DataFrame, current: RateTable, proposed: RateTable) -> pd.DataFrame:
+    """Show how one policy's premium is built on each rate table, factor by factor.
+
+    policy is a one-row DataFrame. Uses price_breakdown, so the factors and
+    premiums are exactly the ones pricing used. Rows: the base premium, one
+    per rating factor, then the final premium. Columns: step, value (the
+    policy's own value for that factor), current, proposed and changed.
+    """
+    if len(policy) != 1:
+        raise ValueError(f"expected one policy, got {len(policy)} rows")
+    cur = price_breakdown(policy, current).iloc[0]
+    prop = price_breakdown(policy, proposed).iloc[0]
+
+    rows = [("base premium", "", current.base_premium, proposed.base_premium)]
+    rows += [
+        (name, f"{policy[name].iloc[0]:,}", cur[f"f_{name}"], prop[f"f_{name}"])
+        for name in RATING_FACTORS
+    ]
+    rows += [("premium", "", cur["premium"], prop["premium"])]
+    out = pd.DataFrame(rows, columns=["step", "value", "current", "proposed"])
+    out["changed"] = out["current"] != out["proposed"]
+    return out
 
 
 def _money(value: float) -> float:
