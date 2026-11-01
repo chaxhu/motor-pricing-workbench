@@ -30,7 +30,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import IO, Any, Iterator
 
 import pandas as pd
 
@@ -115,6 +115,11 @@ def _share(text: str) -> float:
     return value
 
 
+def read_policies(source: str | Path | IO) -> pd.DataFrame:
+    """Read a policies CSV from a path or an open file. policy_id is kept as text, so IDs like 007 survive."""
+    return pd.read_csv(source, dtype={"policy_id": str})
+
+
 @dataclass
 class EvaluationResult:
     """Everything one evaluation produces.
@@ -186,7 +191,7 @@ def run(args: argparse.Namespace) -> int:
 
     with timed("load data", timings):
         if args.input:
-            policies = pd.read_csv(args.input, dtype={"policy_id": str})
+            policies = read_policies(args.input)
             logger.info("Read %d policies from %s", len(policies), args.input)
         else:
             policies = generate_policies(args.policies, current, seed=args.seed)

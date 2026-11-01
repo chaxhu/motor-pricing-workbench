@@ -46,7 +46,14 @@ REASON_SEPARATOR = "; "
 
 
 class SchemaError(ValueError):
-    """Raised when required columns are missing. The whole file is unusable, so this is fatal."""
+    """Raised when required columns are missing. The whole file is unusable, so this is fatal.
+
+    missing lists the absent columns, so a caller can show them without parsing the message.
+    """
+
+    def __init__(self, missing: list[str]) -> None:
+        super().__init__(f"policies are missing required columns {missing}")
+        self.missing = missing
 
 
 @dataclass
@@ -99,7 +106,7 @@ def _check_schema(df: pd.DataFrame) -> None:
     """Raise SchemaError if any required column is missing."""
     missing = [col for col in POLICY_COLUMNS if col not in df.columns]
     if missing:
-        raise SchemaError(f"policies are missing required columns {missing}")
+        raise SchemaError(missing)
 
 
 def _coerce_numbers(original: pd.DataFrame) -> pd.DataFrame:

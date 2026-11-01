@@ -57,8 +57,9 @@ def test_negative_premium_is_rejected(policies: pd.DataFrame, current_rates: Rat
 
 
 def test_missing_column_raises_schema_error(policies: pd.DataFrame, current_rates: RateTable) -> None:
-    with pytest.raises(SchemaError, match="vehicle_age"):
+    with pytest.raises(SchemaError, match="vehicle_age") as info:
         validate_policies(policies.drop(columns="vehicle_age"), current_rates)
+    assert info.value.missing == ["vehicle_age"]
 
 
 @pytest.mark.parametrize(("offset", "rejected"), [(0.005, False), (1.00, True)])

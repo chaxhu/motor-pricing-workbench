@@ -6,51 +6,76 @@ workbench.pipeline.run_evaluation, the same function the command line run
 uses, so the page and the CLI always agree. There is no pricing, validation
 or reconciliation logic in this file.
 
-The data is synthetic and the rates are illustrative assumptions, not real
-Hastings Direct pricing.
+The data is synthetic unless a CSV is uploaded, and the rates are
+illustrative assumptions, not real Hastings Direct pricing.
 """
 
 from __future__ import annotations
+
+import io
+from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
 from workbench.compare import Check
-from workbench.data import N_INJECTED_ROWS, generate_policies, inject_errors
+from workbench.data import N_INJECTED_ROWS, POLICY_COLUMNS, generate_policies, inject_errors
 from workbench.pipeline import (
     BAD_INPUT_ERRORS,
     DEFAULT_CURRENT_RATES,
     DEFAULT_PROPOSED_RATES,
     EvaluationResult,
+    read_policies,
     run_evaluation,
 )
 from workbench.rates import load_rate_table
 from workbench.report import distribution_figure, format_pounds
-from workbench.validate import ValidationResult
+from workbench.validate import SchemaError, ValidationResult
 
 SEED = 42  # the CLI default, so the page matches python -m workbench.pipeline
 BANNER = "Synthetic data and illustrative rates. Not real pricing."
+SYNTHETIC = "Synthetic"
+UPLOAD_CSV = "Upload policies CSV"
 
 
 @st.cache_data(max_entries=20, show_spinner="Running evaluation...")
-def evaluate(n_policies: int, plant_errors: bool) -> EvaluationResult:
-    """Generate the policies and run the evaluation. Cached, so a rerun with the same inputs is instant."""
+def evaluate(n_policies: int, plant_errors: bool, policies_csv: bytes | None) -> EvaluationResult:
+    """Load or generate the policies and run the evaluation.
+
+    Cached on the inputs, so a rerun with the same inputs is instant.
+    policies_csv is the uploaded file's bytes, or None for synthetic policies.
+    """
     current = load_rate_table(DEFAULT_CURRENT_RATES)
     proposed = load_rate_table(DEFAULT_PROPOSED_RATES)
-    policies = generate_policies(n_policies, current, seed=SEED)
-    if plant_errors:
-        policies = inject_errors(policies)
+    if policies_csv is None:
+        policies = generate_policies(n_policies, current, seed=SEED)
+        if plant_errors:
+            policies = inject_errors(policies)
+    else:
+        policies = read_policies(io.BytesIO(policies_csv))
     return run_evaluation(policies, current, proposed)
 
 
 def sidebar() -> None:
     """Draw the inputs. Clicking the button saves them, so later reruns use the same run."""
-    st.sidebar.header("Run settings")
-    n_policies = st.sidebar.slider("Number of policies", 1_000, 100_000, 10_000, step=1_000)
-    plant_errors = st.sidebar.toggle(f"Plant {N_INJECTED_ROWS} known data errors")
-    if st.sidebar.button("Run evaluation", type="primary"):
-        st.session_state["run"] = (n_policies, plant_errors)
+    st.sidebar.header("Policies")
+    source = st.sidebar.radio("Data source", [SYNTHETIC, UPLOAD_CSV], key="source")
+    run: dict[str, Any] = {"n_policies": 0, "plant_errors": False, "policies_csv": None, "label": ""}
+    if source == SYNTHETIC:
+        run["n_policies"] = st.sidebar.slider("Number of policies", 1_000, 100_000, 10_000, step=1_000)
+        run["plant_errors"] = st.sidebar.toggle(f"Plant {N_INJECTED_ROWS} known data errors")
+        run["label"] = f"{run['n_policies']:,} generated policies, seed {SEED}, " + (
+            f"{N_INJECTED_ROWS} planted errors." if run["plant_errors"] else "no planted errors."
+        )
+    else:
+        upload = st.sidebar.file_uploader("Policies CSV", type="csv", key="policies_file")
+        if upload is not None:
+            run["policies_csv"], run["label"] = upload.getvalue(), f"Policies from {upload.name}."
+
+    ready = source == SYNTHETIC or run["policies_csv"] is not None
+    if st.sidebar.button("Run evaluation", type="primary", disabled=not ready):
+        st.session_state["run"] = run
 
 
 def show_headlines(evaluation: EvaluationResult) -> None:
@@ -117,6 +142,13 @@ def show_stopped(evaluation: EvaluationResult) -> None:
     show_rejected(validation)
 
 
+def show_schema_error(exc: SchemaError) -> None:
+    st.error(
+        f"The CSV is missing {len(exc.missing)} required column(s): {', '.join(exc.missing)}. "
+        f"It needs all of these: {', '.join(POLICY_COLUMNS)}."
+    )
+
+
 st.set_page_config(page_title="Motor pricing workbench", layout="wide")
 st.warning(BANNER)
 st.title("Motor pricing workbench")
@@ -126,16 +158,16 @@ if "run" not in st.session_state:
     st.info("Choose the settings in the sidebar, then click Run evaluation.")
     st.stop()
 
-n_policies, plant_errors = st.session_state["run"]
-st.caption(
-    f"{n_policies:,} generated policies, seed {SEED}, "
-    + (f"{N_INJECTED_ROWS} planted errors." if plant_errors else "no planted errors.")
-)
+run = st.session_state["run"]
+st.caption(run["label"])
 
 try:
-    evaluation = evaluate(n_policies, plant_errors)
-except BAD_INPUT_ERRORS as exc:
-    st.error(f"Bad input or config: {exc}")
+    evaluation = evaluate(run["n_policies"], run["plant_errors"], run["policies_csv"])
+except SchemaError as exc:
+    show_schema_error(exc)
+    st.stop()
+except (*BAD_INPUT_ERRORS, UnicodeDecodeError) as exc:
+    st.error(f"Could not run with these inputs: {exc}")
     st.stop()
 
 if evaluation.stopped:
