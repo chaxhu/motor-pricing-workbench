@@ -1,0 +1,29 @@
+# Run the tests (including the Streamlit app smoke test) and a full pipeline
+# run on every push and pull request.
+# The pipeline run uses --inject-errors, so it also proves validation catches
+# the planted problems and the numbers still reconcile (exit code 0).
+
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev,ui]"
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Run the pipeline with planted errors
+        run: python -m workbench.pipeline --inject-errors
