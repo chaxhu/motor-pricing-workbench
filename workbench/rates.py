@@ -66,23 +66,29 @@ class RateTable:
 
 
 def load_rate_table(path: str | Path) -> RateTable:
-    """Read a rating table from YAML, build a RateTable, and check it."""
+    """Read a rating table from a YAML file, build a RateTable, and check it."""
     path = Path(path)
+    table = parse_rate_table(path.read_text(encoding="utf-8"), source=path)
+    logger.info("Loaded rate table '%s' from %s", table.version, path)
+    return table
+
+
+def parse_rate_table(text: str, source: str | Path = "<text>") -> RateTable:
+    """Build a RateTable from YAML text and check it. source names the text in error messages."""
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise RateTableError(f"{path}: not valid YAML: {exc}") from exc
+        raise RateTableError(f"{source}: not valid YAML: {exc}") from exc
 
     if not isinstance(raw, dict):
-        raise RateTableError(f"{path}: expected a mapping at the top level")
+        raise RateTableError(f"{source}: expected a mapping at the top level")
 
     table = RateTable(
-        version=_require_str(raw, "version", path),
-        base_premium=_require_number(raw, "base_premium", path),
-        factors=_parse_factors(raw.get("factors"), path),
+        version=_require_str(raw, "version", source),
+        base_premium=_require_number(raw, "base_premium", source),
+        factors=_parse_factors(raw.get("factors"), source),
     )
     check_rate_table(table)
-    logger.info("Loaded rate table '%s' from %s", table.version, path)
     return table
 
 
@@ -129,19 +135,19 @@ def _check_bands(version: str, name: str, bands: tuple[Band, ...]) -> None:
             raise RateTableError(f"{where}: band {i} starts at {nxt.lower}, overlapping the previous band ending at {prev.upper}")
 
 
-def _parse_factors(raw: Any, path: Path) -> dict[str, tuple[Band, ...]]:
+def _parse_factors(raw: Any, source: str | Path) -> dict[str, tuple[Band, ...]]:
     """Turn the 'factors' section of the YAML into Band tuples."""
     if not isinstance(raw, dict):
-        raise RateTableError(f"{path}: 'factors' must be a mapping of factor name to bands")
+        raise RateTableError(f"{source}: 'factors' must be a mapping of factor name to bands")
 
     factors: dict[str, tuple[Band, ...]] = {}
     for name, raw_bands in raw.items():
         if raw_bands is None:
             raw_bands = []
         if not isinstance(raw_bands, list):
-            raise RateTableError(f"{path}: factor '{name}' must be a list of bands")
+            raise RateTableError(f"{source}: factor '{name}' must be a list of bands")
         factors[str(name)] = tuple(
-            _parse_band(raw_band, f"{path}: {name} band {i}") for i, raw_band in enumerate(raw_bands)
+            _parse_band(raw_band, f"{source}: {name} band {i}") for i, raw_band in enumerate(raw_bands)
         )
     return factors
 

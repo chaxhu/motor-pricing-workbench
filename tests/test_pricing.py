@@ -15,7 +15,8 @@ import pandas as pd
 import pytest
 
 from workbench.pricing import PricingError, price_one, price_portfolio, price_row_by_row, round_pence
-from workbench.rates import Band, RateTable, RateTableError, check_rate_table
+from workbench.rates import Band, RateTable, RateTableError, check_rate_table, parse_rate_table
+from tests.conftest import CONFIG_DIR
 
 # A policy where every factor except driver_age is 1.00 on the current rates,
 # so the premium is exactly 420 x the driver_age factor.
@@ -99,3 +100,12 @@ def test_negative_factor_raises(current_rates: RateTable) -> None:
     table = replace(current_rates, factors={**current_rates.factors, "claims_last_5y": tuple(bands)})
     with pytest.raises(RateTableError, match="factor must be > 0"):
         check_rate_table(table)
+
+
+def test_parse_rate_table_matches_file_and_runs_the_checks(proposed_rates: RateTable) -> None:
+    text = (CONFIG_DIR / "rates_proposed.yaml").read_text(encoding="utf-8")
+    assert parse_rate_table(text) == proposed_rates
+
+    gappy = text.replace("{lower: 3, upper: 8,", "{lower: 4, upper: 8,")  # vehicle_age now skips 3 to 4
+    with pytest.raises(RateTableError, match="gap between 3.0 and 4.0"):
+        parse_rate_table(gappy, source="upload.yaml")
