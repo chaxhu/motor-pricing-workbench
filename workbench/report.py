@@ -45,6 +45,18 @@ def format_pounds(value: float, sign: bool = False) -> str:
 def plot_distribution(results: pd.DataFrame, path: str | Path) -> Path:
     """Save a histogram of the % change for the policies whose premium changed."""
     path = Path(path)
+    fig = distribution_figure(results)
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    logger.info("Saved chart to %s", path)
+    return path
+
+
+def distribution_figure(results: pd.DataFrame) -> plt.Figure:
+    """Draw the histogram of % change for the policies whose premium changed.
+
+    The caller must close the figure with plt.close when done with it.
+    """
     affected = results.loc[results["direction"] != "no change", "pct_change"]
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
@@ -58,10 +70,7 @@ def plot_distribution(results: pd.DataFrame, path: str | Path) -> Path:
     ax.set_ylabel("Number of policies")
     ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
-    logger.info("Saved chart to %s", path)
-    return path
+    return fig
 
 
 def markdown_table(df: pd.DataFrame, formats: dict[str, Callable[[Any], str]] | None = None) -> str:

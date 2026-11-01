@@ -6,6 +6,11 @@ always give the same report. The steps are: load rates, load or generate
 policies, validate, compare current and proposed premiums, summarise,
 reconcile, and write the outputs.
 
+run_evaluation does the validate, compare, summarise and reconcile steps
+and returns everything in one EvaluationResult, without writing any files.
+The command line run and the Streamlit app both call it, so they always
+give the same numbers.
+
 Exit codes:
     0  success
     1  too many rejected rows (reject rate above --max-reject-rate)
@@ -23,12 +28,14 @@ import logging
 import sys
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import pandas as pd
 
 from workbench.compare import (
+    Check,
     change_distribution,
     compare_premiums,
     portfolio_summary,
@@ -37,13 +44,16 @@ from workbench.compare import (
 )
 from workbench.data import generate_policies, inject_errors
 from workbench.pricing import PricingError
-from workbench.rates import RateTableError, load_rate_table
+from workbench.rates import RateTable, RateTableError, load_rate_table
 from workbench.report import CHART_NAME, format_pounds, plot_distribution, write_report
-from workbench.validate import SchemaError, validate_policies
+from workbench.validate import SchemaError, ValidationResult, validate_policies
 
 logger = logging.getLogger("workbench.pipeline")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CURRENT_RATES = PROJECT_ROOT / "config" / "rates_current.yaml"
+DEFAULT_PROPOSED_RATES = PROJECT_ROOT / "config" / "rates_proposed.yaml"
+DEFAULT_MAX_REJECT_RATE = 0.05
 
 EXIT_OK = 0
 EXIT_TOO_MANY_REJECTS = 1
@@ -84,10 +94,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--policies", type=_positive_int, default=10_000, help="how many policies to generate (default 10000)")
     parser.add_argument("--seed", type=int, default=42, help="random seed for generated policies (default 42)")
     parser.add_argument("--inject-errors", action="store_true", help="plant six known errors in the policies")
-    parser.add_argument("--current", type=Path, default=PROJECT_ROOT / "config" / "rates_current.yaml")
-    parser.add_argument("--proposed", type=Path, default=PROJECT_ROOT / "config" / "rates_proposed.yaml")
+    parser.add_argument("--current", type=Path, default=DEFAULT_CURRENT_RATES)
+    parser.add_argument("--proposed", type=Path, default=DEFAULT_PROPOSED_RATES)
     parser.add_argument("--out", type=Path, default=PROJECT_ROOT / "outputs", help="output folder (default outputs/)")
-    parser.add_argument("--max-reject-rate", type=_share, default=0.05, help="stop if more than this share is rejected (default 0.05)")
+    parser.add_argument("--max-reject-rate", type=_share, default=DEFAULT_MAX_REJECT_RATE, help="stop if more than this share is rejected (default 0.05)")
     return parser.parse_args(argv)
 
 
@@ -103,6 +113,66 @@ def _share(text: str) -> float:
     if not 0 <= value <= 1:
         raise argparse.ArgumentTypeError(f"must be between 0 and 1, got {value}")
     return value
+
+
+@dataclass
+class EvaluationResult:
+    """Everything one evaluation produces.
+
+    If too many rows were rejected, stopped is True and only validation and
+    timings are filled in. The other fields stay None or empty, because
+    nothing was priced.
+    """
+
+    validation: ValidationResult
+    max_reject_rate: float
+    stopped: bool
+    results: pd.DataFrame | None = None
+    summary: dict[str, Any] | None = None
+    distribution: pd.DataFrame | None = None
+    segments: pd.DataFrame | None = None
+    checks: list[Check] = field(default_factory=list)
+    timings: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def reconciliation_passed(self) -> bool:
+        """True only if the run was not stopped and every check passed."""
+        return not self.stopped and all(check.passed for check in self.checks)
+
+
+def run_evaluation(
+    policies: pd.DataFrame,
+    current: RateTable,
+    proposed: RateTable,
+    max_reject_rate: float = DEFAULT_MAX_REJECT_RATE,
+) -> EvaluationResult:
+    """Validate, price, compare, summarise and reconcile, without writing any files.
+
+    Stops after validation if more than max_reject_rate of the rows are rejected.
+    """
+    timings: dict[str, float] = {}
+    with timed("validate", timings):
+        validation = validate_policies(policies, current)
+
+    if validation.reject_rate > max_reject_rate:
+        return EvaluationResult(validation, max_reject_rate, stopped=True, timings=timings)
+
+    with timed("price and compare", timings):
+        results = compare_premiums(validation.valid, proposed)
+    with timed("summarise", timings):
+        summary = portfolio_summary(results)
+    with timed("distribution", timings):
+        distribution = change_distribution(results)
+    with timed("SQL segments", timings):
+        segments = segment_impact(results)
+    with timed("reconcile", timings):
+        checks = reconcile(results, summary, segments, len(validation.valid))  # logs PASS/FAIL per check
+
+    return EvaluationResult(
+        validation, max_reject_rate, stopped=False,
+        results=results, summary=summary, distribution=distribution,
+        segments=segments, checks=checks, timings=timings,
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -123,29 +193,24 @@ def run(args: argparse.Namespace) -> int:
         if args.inject_errors:
             policies = inject_errors(policies)
 
-    with timed("validate", timings):
-        validation = validate_policies(policies, current)
+    evaluation = run_evaluation(policies, current, proposed, args.max_reject_rate)
+    validation = evaluation.validation
+    # Add "validate" now so the report lists it before "write rejected", as it always has.
+    timings["validate"] = evaluation.timings["validate"]
 
     with timed("write rejected", timings):
         validation.rejected.to_csv(args.out / "rejected_policies.csv", index=False)
 
-    if validation.reject_rate > args.max_reject_rate:
+    if evaluation.stopped:
         logger.error(
             "Stopping: %.2f%% of policies rejected, above the %.2f%% limit. See %s",
             100 * validation.reject_rate, 100 * args.max_reject_rate, args.out / "rejected_policies.csv",
         )
         return EXIT_TOO_MANY_REJECTS
 
-    with timed("price and compare", timings):
-        results = compare_premiums(validation.valid, proposed)
-    with timed("summarise", timings):
-        summary = portfolio_summary(results)
-    with timed("distribution", timings):
-        distribution = change_distribution(results)
-    with timed("SQL segments", timings):
-        segments = segment_impact(results)
-    with timed("reconcile", timings):
-        checks = reconcile(results, summary, segments, len(validation.valid))  # logs PASS/FAIL per check
+    # update() keeps "validate" where it already is and adds the later steps after it.
+    timings.update(evaluation.timings)
+    results, summary, segments = evaluation.results, evaluation.summary, evaluation.segments
 
     with timed("write outputs", timings):
         results.to_csv(args.out / "policy_results.csv", index=False)
@@ -158,9 +223,9 @@ def run(args: argparse.Namespace) -> int:
         proposed_version=proposed.version,
         validation=validation,
         summary=summary,
-        distribution=distribution,
+        distribution=evaluation.distribution,
         segments=segments,
-        checks=checks,
+        checks=evaluation.checks,
         timings=timings,
         chart_path=chart_path,
     )
@@ -173,7 +238,7 @@ def run(args: argparse.Namespace) -> int:
         change, summary["total_change_pct"], affected, report_path,
     )
 
-    if not all(check.passed for check in checks):
+    if not evaluation.reconciliation_passed:
         logger.error("Reconciliation FAILED. Do not use these numbers until the failed checks are explained.")
         return EXIT_RECONCILIATION_FAILED
     return EXIT_OK
