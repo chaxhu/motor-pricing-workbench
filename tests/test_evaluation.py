@@ -17,6 +17,7 @@ from workbench.compare import Check
 from workbench.data import generate_policies, inject_errors
 from workbench.pipeline import EXIT_OK, main, run_evaluation
 from workbench.rates import RateTable
+from workbench.report import CHART_NAME, render_report, write_report
 
 
 def test_run_evaluation_matches_cli(tmp_path: Path, current_rates: RateTable, proposed_rates: RateTable) -> None:
@@ -48,3 +49,24 @@ def test_run_evaluation_stops_when_too_many_rejected(current_rates: RateTable, p
     assert not evaluation.reconciliation_passed
     assert len(evaluation.validation.rejected) == 7
     assert evaluation.results is None and evaluation.summary is None and evaluation.checks == []
+
+
+def test_render_report_matches_written_report(tmp_path: Path, current_rates: RateTable, proposed_rates: RateTable) -> None:
+    evaluation = run_evaluation(generate_policies(500, current_rates, seed=42), current_rates, proposed_rates)
+    parts = dict(
+        current_version=current_rates.version,
+        proposed_version=proposed_rates.version,
+        validation=evaluation.validation,
+        summary=evaluation.summary,
+        distribution=evaluation.distribution,
+        segments=evaluation.segments,
+        checks=evaluation.checks,
+        timings=evaluation.timings,
+    )
+    written = write_report(tmp_path, **parts, chart_path=tmp_path / CHART_NAME).read_text(encoding="utf-8")
+    rendered = render_report(**parts, chart_link=CHART_NAME)
+
+    def without_run_time(text: str) -> list[str]:
+        return [line for line in text.splitlines() if not line.startswith("Run at ")]
+
+    assert without_run_time(rendered) == without_run_time(written)

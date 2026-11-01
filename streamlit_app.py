@@ -30,7 +30,7 @@ from workbench.pipeline import (
     run_evaluation,
 )
 from workbench.rates import RateTable, RateTableError, load_rate_table, parse_rate_table, rate_changes
-from workbench.report import distribution_figure, format_pounds
+from workbench.report import CHART_NAME, distribution_figure, format_pounds, render_report
 from workbench.validate import SchemaError, ValidationResult
 
 SEED = 42  # the CLI default, so the page matches python -m workbench.pipeline
@@ -71,6 +71,44 @@ def evaluate(
     else:
         policies = read_policies(io.BytesIO(policies_csv))
     return run_evaluation(policies, current, proposed)
+
+
+@st.cache_data(max_entries=5, show_spinner=False)
+def build_downloads(
+    n_policies: int, plant_errors: bool, policies_csv: bytes | None, proposed_yaml: str | None, proposed_name: str
+) -> dict[str, tuple[bytes, str]]:
+    """Build the output files in memory, as file name -> (content, MIME type). Nothing is written to disk.
+
+    These are the files the CLI writes. A stopped run only has rejected_policies.csv, as with the CLI.
+    """
+    evaluation = evaluate(n_policies, plant_errors, policies_csv, proposed_yaml, proposed_name)
+    files = {"rejected_policies.csv": (evaluation.validation.rejected.to_csv(index=False).encode(), "text/csv")}
+    if evaluation.stopped:
+        return files
+
+    current, proposed = load_rates(proposed_yaml, proposed_name)
+    report = render_report(
+        current_version=current.version,
+        proposed_version=proposed.version,
+        validation=evaluation.validation,
+        summary=evaluation.summary,
+        distribution=evaluation.distribution,
+        segments=evaluation.segments,
+        checks=evaluation.checks,
+        timings=evaluation.timings,
+        chart_link=CHART_NAME,
+    )
+    fig = distribution_figure(evaluation.results)
+    chart = io.BytesIO()
+    fig.savefig(chart, format="png", dpi=120)
+    plt.close(fig)
+    return {
+        "policy_results.csv": (evaluation.results.to_csv(index=False).encode(), "text/csv"),
+        "segment_impact.csv": (evaluation.segments.to_csv(index=False).encode(), "text/csv"),
+        **files,
+        "report.md": (report.encode(), "text/markdown"),
+        CHART_NAME: (chart.getvalue(), "image/png"),
+    }
 
 
 def sidebar() -> str | None:
@@ -261,6 +299,20 @@ def show_stopped(evaluation: EvaluationResult) -> None:
     show_rejected(validation)
 
 
+def show_downloads(run: dict[str, Any]) -> None:
+    st.subheader("Downloads")
+    files = build_downloads(*run_args(run))
+    if CHART_NAME in files:
+        st.caption(f"report.md shows the chart if {CHART_NAME} is saved in the same folder.")
+    for col, (name, (content, mime)) in zip(st.columns(len(files)), files.items()):
+        col.download_button(name, content, file_name=name, mime=mime, key=f"download_{name}")
+
+
+def run_args(run: dict[str, Any]) -> tuple[Any, ...]:
+    """The saved run settings, in the order evaluate and build_downloads take them."""
+    return run["n_policies"], run["plant_errors"], run["policies_csv"], run["proposed_yaml"], run["proposed_name"]
+
+
 def show_schema_error(exc: SchemaError) -> None:
     st.error(
         f"The CSV is missing {len(exc.missing)} required column(s): {', '.join(exc.missing)}. "
@@ -287,9 +339,7 @@ run = st.session_state["run"]
 st.caption(run["label"])
 
 try:
-    evaluation = evaluate(
-        run["n_policies"], run["plant_errors"], run["policies_csv"], run["proposed_yaml"], run["proposed_name"]
-    )
+    evaluation = evaluate(*run_args(run))
 except SchemaError as exc:
     show_schema_error(exc)
     st.stop()
@@ -299,6 +349,7 @@ except (*BAD_INPUT_ERRORS, UnicodeDecodeError) as exc:
 
 if evaluation.stopped:
     show_stopped(evaluation)
+    show_downloads(run)
     st.stop()
 
 if not evaluation.reconciliation_passed:
@@ -313,3 +364,4 @@ show_segments(evaluation.segments)
 show_largest_changes(evaluation.results)
 show_lookup(evaluation, current_rates, proposed_rates)
 show_rejected(evaluation.validation)
+show_downloads(run)

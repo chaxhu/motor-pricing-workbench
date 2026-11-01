@@ -115,17 +115,22 @@ def write_report(
     out_dir = Path(out_dir)
     passed = all(check.passed for check in checks)
 
-    sections = [
-        _header_section(current_version, proposed_version),
-        _reconciliation_section(checks, passed),
-        _input_section(validation),
-        _impact_section(summary),
-        _distribution_section(distribution, chart_path, out_dir),
-        _segment_section(segments),
-        _timing_section(timings),
-    ]
+    chart_link = chart_path.relative_to(out_dir).as_posix() if chart_path.is_relative_to(out_dir) else chart_path.as_posix()
     report_path = out_dir / "report.md"
-    report_path.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
+    report_path.write_text(
+        render_report(
+            current_version=current_version,
+            proposed_version=proposed_version,
+            validation=validation,
+            summary=summary,
+            distribution=distribution,
+            segments=segments,
+            checks=checks,
+            timings=timings,
+            chart_link=chart_link,
+        ),
+        encoding="utf-8",
+    )
 
     (out_dir / "summary.json").write_text(
         json.dumps(
@@ -142,6 +147,32 @@ def write_report(
     )
     logger.info("Wrote %s and summary.json", report_path)
     return report_path
+
+
+def render_report(
+    *,
+    current_version: str,
+    proposed_version: str,
+    validation: ValidationResult,
+    summary: dict[str, Any],
+    distribution: pd.DataFrame,
+    segments: pd.DataFrame,
+    checks: list[Check],
+    timings: dict[str, float],
+    chart_link: str,
+) -> str:
+    """Build the text of report.md without writing anything. chart_link is where the report points for the chart."""
+    passed = all(check.passed for check in checks)
+    sections = [
+        _header_section(current_version, proposed_version),
+        _reconciliation_section(checks, passed),
+        _input_section(validation),
+        _impact_section(summary),
+        _distribution_section(distribution, chart_link),
+        _segment_section(segments),
+        _timing_section(timings),
+    ]
+    return "\n\n".join(sections) + "\n"
 
 
 def _header_section(current_version: str, proposed_version: str) -> str:
@@ -208,15 +239,14 @@ def _impact_section(s: dict[str, Any]) -> str:
     ])
 
 
-def _distribution_section(distribution: pd.DataFrame, chart_path: Path, out_dir: Path) -> str:
+def _distribution_section(distribution: pd.DataFrame, chart_link: str) -> str:
     table = markdown_table(distribution, {"share": lambda v: f"{v:.1%}"})
-    chart = chart_path.relative_to(out_dir).as_posix() if chart_path.is_relative_to(out_dir) else chart_path.as_posix()
     return "\n".join([
         "## How premiums change",
         "",
         table,
         "",
-        f"![Distribution of premium changes]({chart})",
+        f"![Distribution of premium changes]({chart_link})",
     ])
 
 
