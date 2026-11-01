@@ -11,8 +11,12 @@ premiums, because a fast wrong answer is worthless.
 Run from the project root:
     python benchmark.py --sizes 1000 10000 100000 --repeats 5
 
-Results are printed and written to docs/benchmark_results.md. The data and
-rates are synthetic; the rates are illustrative, not real Hastings Direct pricing.
+Results are printed and written to outputs/benchmark_results.md, which git
+ignores, so a quick run never changes the committed results. Add --save to
+also update docs/benchmark_results.md, the copy the README quotes.
+
+The data and rates are synthetic; the rates are illustrative, not real
+Hastings Direct pricing.
 """
 
 from __future__ import annotations
@@ -35,7 +39,9 @@ from workbench.rates import load_rate_table
 from workbench.validate import validate_policies
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-RESULTS_PATH = PROJECT_ROOT / "docs" / "benchmark_results.md"
+RESULTS_PATH = PROJECT_ROOT / "outputs" / "benchmark_results.md"
+# Only written with --save, because the README quotes this file.
+SAVED_RESULTS_PATH = PROJECT_ROOT / "docs" / "benchmark_results.md"
 SEED = 0
 # Row-by-row is slow, so above this size it is timed once instead of best of N.
 ROW_BY_ROW_SINGLE_RUN_ABOVE = 100_000
@@ -71,13 +77,12 @@ def benchmark_size(n: int, repeats: int) -> dict[str, float]:
     }
 
 
-def write_results(rows: list[dict[str, float]], repeats: int) -> None:
-    """Write the results table, with the machine details, to docs/benchmark_results.md."""
+def write_results(rows: list[dict[str, float]], repeats: int, command: str, paths: list[Path]) -> None:
+    """Write the results table, with the machine details and the command used, to each of paths."""
     lines = [
         "# Benchmark results",
         "",
-        f"Run on {datetime.now():%Y-%m-%d %H:%M} with `python benchmark.py "
-        f"--sizes {' '.join(str(r['policies']) for r in rows)} --repeats {repeats}`.",
+        f"Run on {datetime.now():%Y-%m-%d %H:%M} with `{command}`.",
         "",
         f"- Machine: {platform.system()} {platform.release()}, {platform.machine()}, "
         f"{platform.processor() or 'unknown processor'}, {os.cpu_count()} logical CPUs",
@@ -95,14 +100,19 @@ def write_results(rows: list[dict[str, float]], repeats: int) -> None:
             f"| {r['policies']:,} | {r['row_by_row']:.4f} | {r['vectorised']:.4f} "
             f"| {r['row_by_row'] / r['vectorised']:,.0f}x | {r['validation']:.4f} |"
         )
-    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    RESULTS_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Time the pricing engines and validation.")
     parser.add_argument("--sizes", type=int, nargs="+", default=[1_000, 10_000, 100_000])
     parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument(
+        "--save", action="store_true",
+        help="also update docs/benchmark_results.md, the results the README quotes",
+    )
     args = parser.parse_args(argv)
 
     print(f"Python {platform.python_version()} on {platform.system()} {platform.release()}")
@@ -114,8 +124,14 @@ def main(argv: list[str] | None = None) -> int:
             f"{n:>10,} policies | row-by-row {r['row_by_row']:8.4f}s | vectorised {r['vectorised']:7.4f}s "
             f"| speed-up {r['row_by_row'] / r['vectorised']:6,.0f}x | validation {r['validation']:7.4f}s"
         )
-    write_results(rows, args.repeats)
-    print(f"Wrote {RESULTS_PATH.relative_to(PROJECT_ROOT)}")
+    command = f"python benchmark.py --sizes {' '.join(map(str, args.sizes))} --repeats {args.repeats}"
+    command += " --save" if args.save else ""
+    paths = [RESULTS_PATH, SAVED_RESULTS_PATH] if args.save else [RESULTS_PATH]
+    write_results(rows, args.repeats, command, paths)
+    for path in paths:
+        print(f"Wrote {path.relative_to(PROJECT_ROOT)}")
+    if not args.save:
+        print("docs/benchmark_results.md not changed (use --save to update it)")
     return 0
 
 
