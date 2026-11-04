@@ -1,0 +1,45 @@
+# Broken proposed rating table, for demonstrating the rate table checks.
+#
+# ILLUSTRATIVE ONLY. These numbers are made up for a portfolio project.
+# They are not real Hastings Direct pricing, or any insurer's pricing.
+#
+# This is a copy of config/rates_proposed.yaml with ONE deliberate mistake:
+# the second driver_age band starts at 26 instead of 25. That leaves a gap,
+# so a 25 year old driver would have no price at all.
+#
+# Upload it in the app under "Proposed rates" > "Upload YAML". The app should
+# say "driver_age: gap between 25.0 and 26.0" and keep Run evaluation off.
+
+version: proposed_broken
+base_premium: 420.0
+
+factors:
+  driver_age:
+    - {lower: 17, upper: 25, factor: 1.80}
+    - {lower: 26, upper: 35, factor: 1.20}  # MISTAKE: should start at 25
+    - {lower: 35, upper: 60, factor: 1.00}
+    - {lower: 60, upper: 75, factor: 1.05}
+    - {lower: 75, upper: 100, factor: 1.30}
+
+  vehicle_age:
+    - {lower: 0, upper: 3, factor: 1.15}
+    - {lower: 3, upper: 8, factor: 1.00}
+    - {lower: 8, upper: 15, factor: 0.92}
+    - {lower: 15, upper: 60, factor: 1.10}
+
+  annual_mileage:
+    - {lower: 0, upper: 5000, factor: 0.90}
+    - {lower: 5000, upper: 10000, factor: 1.00}
+    - {lower: 10000, upper: 15000, factor: 1.10}
+    - {lower: 15000, upper: 200000, factor: 1.35}
+
+  driving_experience:
+    - {lower: 0, upper: 2, factor: 1.30}
+    - {lower: 2, upper: 5, factor: 1.10}
+    - {lower: 5, upper: 100, factor: 1.00}
+
+  claims_last_5y:
+    - {lower: 0, upper: 1, factor: 1.00}
+    - {lower: 1, upper: 2, factor: 1.32}
+    - {lower: 2, upper: 3, factor: 1.50}
+    - {lower: 3, upper: 50, factor: 1.90}
