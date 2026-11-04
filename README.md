@@ -1,12 +1,12 @@
 # Motor Pricing Workbench
 
+![tests](https://github.com/chaxhu/motor-pricing-workbench/actions/workflows/tests.yml/badge.svg)
+
 **If we change these rating factors, what happens to every policy, and can we trust the answer?**
 
 This project answers that question for a motor insurance portfolio. It loads two rating tables (current and proposed), checks every policy, prices each one on both sets of rates, compares the results with pandas and with SQL, makes sure all the totals agree, and writes a report.
 
 > **All data and rates in this project are synthetic and illustrative.** The policies are randomly generated and the rating factors are made up. They are not any real insurer's pricing.
-
-![tests](https://github.com/chaxhu/motor-pricing-workbench/actions/workflows/tests.yml/badge.svg)
 
 ## Why I built it
 
@@ -58,6 +58,8 @@ Everything else stays the same. The rates live in [config/rates_current.yaml](co
 
 ## How to run it
 
+You need Python 3.10 or newer.
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate            # Windows
@@ -70,6 +72,8 @@ pip install -e ".[dev]"
 | Run the pipeline on 10,000 generated policies | `python -m workbench.pipeline` |
 | Plant six known errors first, to see validation at work | `python -m workbench.pipeline --inject-errors` |
 | Use your own policies | `python -m workbench.pipeline --input policies.csv` |
+| Use other rate tables | `python -m workbench.pipeline --current old.yaml --proposed new.yaml` |
+| See a broken rate table being refused (exit code 3) | `python -m workbench.pipeline --proposed examples/broken_rates_age_gap.yaml` |
 | Other options | `--policies 50000 --seed 7 --out my_run/ --max-reject-rate 0.02` |
 | Run the tests | `pytest` |
 | Time the engines (results go to `outputs/benchmark_results.md`) | `python benchmark.py --sizes 1000 10000 100000` |
@@ -98,7 +102,7 @@ streamlit run streamlit_app.py     # then open http://localhost:8501
 What you can do on the page:
 
 - **Choose the policies.** Generate a synthetic portfolio (1,000 to 100,000 policies, with or without the six planted errors) or upload your own policies CSV. A CSV with missing columns gets a plain message naming them.
-- **Choose the proposed rates.** Use `config/rates_proposed.yaml` or upload a YAML file. An upload goes through the same rate table checks as the config files (gaps, overlaps, factors that are not positive), and nothing is priced until it passes.
+- **Choose the proposed rates.** Use `config/rates_proposed.yaml` or upload a YAML file. An upload goes through the same rate table checks as the config files (gaps, overlaps, factors that are not positive), and nothing is priced until it passes. To see this, upload [examples/broken_rates_age_gap.yaml](examples/broken_rates_age_gap.yaml), which leaves a gap in the driver age bands.
 - **Read the results.** Headline numbers, the six reconciliation checks, the rate changes side by side with the changed bands highlighted, the change histogram, the SQL segment table and every rejected row with its reasons.
 - **Explain a policy.** The largest rise and fall in pounds are shown with their policy IDs. One click, or typing any policy ID, shows its premium factor by factor on both rate tables.
 - **Download the outputs.** `policy_results.csv`, `segment_impact.csv`, `rejected_policies.csv`, `report.md` and the chart, built in memory. They match the files the command line writes.
@@ -177,12 +181,18 @@ What I take from it:
 - **Vectorise validation further,** and let the database enforce what it can, such as unique policy IDs.
 - **Keep the same checks.** The engine comparison (on a sample), the validation reasons and the six reconciliation checks matter even more at that size, because nobody can eyeball 100 million rows.
 
-## What I would add to make it a team tool
+## Making it a team tool
 
-- **Continuous integration.** Already included: GitHub Actions runs the tests and a full pipeline run on every push and pull request.
+Already in place:
+
+- **Continuous integration.** GitHub Actions runs the tests and a full pipeline run on every push and pull request.
+- **A small Streamlit front end,** see [Run the app](#run-the-app).
+
+What I would add next:
+
 - **Rates versioned in Git,** so every rate change goes through a pull request with a review and a clear history of who changed what.
 - **A run log for audit,** recording who ran it, when, which rate files and code version were used, a fingerprint of the input file, and the outcome.
-- **A small Streamlit front end.** Already included, see [Run the app](#run-the-app). Next steps would be letting an analyst pick the current rate table too, and saving each run to the audit log above.
+- **More in the app:** letting an analyst pick the current rate table too, and saving each run to the audit log above.
 
 ## Honest limitations
 
@@ -206,6 +216,8 @@ motor-pricing-workbench/
 │   ├── sample_report.md         a full report from a real run
 │   ├── premium_change_distribution.png
 │   └── app_screenshot.png       the web page after a run
+├── examples/
+│   └── broken_rates_age_gap.yaml  a rate table with a deliberate mistake
 ├── sql/
 │   └── impact_by_segment.sql    segment impact query
 ├── tests/
@@ -224,5 +236,6 @@ motor-pricing-workbench/
 │   ├── report.py                chart, report.md, summary.json
 │   └── pipeline.py              run_evaluation, and the CLI: python -m workbench.pipeline
 ├── .github/workflows/tests.yml  run tests and the pipeline on every push
-└── pyproject.toml
+├── pyproject.toml               package setup and dependencies
+└── requirements.txt             the same dependencies, for pip install -r
 ```
